@@ -1,0 +1,7 @@
+{
+  "name": "Crystal Bot",
+  "description": "High-performance AI assistant providing real-time natural language answers, deep reasoning, web search, image generation, and Grok-style Fun mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
