@@ -99,16 +99,3 @@ data class TeachableSkillRoutine(
     val lastRunText: String = "12m ago • Succeeded",
     val executionCount: Int = 42
 )
-
-data class ConnectedAppIntegration(
-    val id: String,
-    val name: String,
-    val description: String,
-    val category: String,
-    val isConnected: Boolean,
-    val connectedAccount: String? = null,
-    val availableCapabilities: List<String>,
-    val accentColor: Color,
-    val recentActivity: List<String> = emptyList(),
-    val lastSyncTime: String = "Active now"
-)

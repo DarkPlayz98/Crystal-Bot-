@@ -77,12 +77,6 @@ fun WorkspaceBottomBar(
             isSelected = currentTab == WorkspaceTab.ROUTINES,
             onClick = { onTabSelected(WorkspaceTab.ROUTINES) }
         )
-        WorkspaceNavItem(
-            title = "Apps",
-            icon = Icons.Default.Extension,
-            isSelected = currentTab == WorkspaceTab.INTEGRATIONS,
-            onClick = { onTabSelected(WorkspaceTab.INTEGRATIONS) }
-        )
     }
 }
 

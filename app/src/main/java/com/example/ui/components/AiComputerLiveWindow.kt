@@ -125,6 +125,7 @@ fun AiComputerLiveWindow(
     var windowMode by remember { mutableIntStateOf(0) } // 0 = Real Browser, 1 = Bash Terminal
     var commandInput by remember { mutableStateOf("") }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var lastLoadedUrl by remember { mutableStateOf("") }
     var pageProgress by remember { mutableIntStateOf(0) }
     var isPageLoading by remember { mutableStateOf(false) }
     var pageTitle by remember { mutableStateOf("") }
@@ -149,9 +150,10 @@ fun AiComputerLiveWindow(
         val finalUrl = when {
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
             trimmed.contains(".") && !trimmed.contains(" ") -> "https://$trimmed"
-            else -> "https://www.google.com/search?q=" + URLEncoder.encode(trimmed, "UTF-8")
+            else -> "https://en.wikipedia.org/w/index.php?search=" + URLEncoder.encode(trimmed, "UTF-8")
         }
         urlBarText = finalUrl
+        lastLoadedUrl = finalUrl
         onNavigateUrl(finalUrl)
         webViewInstance?.loadUrl(finalUrl)
     }
@@ -546,6 +548,7 @@ fun AiComputerLiveWindow(
                                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                                 request?.url?.toString()?.let { newUrl ->
                                                     urlBarText = newUrl
+                                                    lastLoadedUrl = newUrl
                                                     onNavigateUrl(newUrl)
                                                     view?.loadUrl(newUrl)
                                                 }
@@ -556,6 +559,7 @@ fun AiComputerLiveWindow(
                                                 isPageLoading = true
                                                 url?.let {
                                                     urlBarText = it
+                                                    lastLoadedUrl = it
                                                     onNavigateUrl(it)
                                                 }
                                                 canGoBack = view?.canGoBack() == true
@@ -567,6 +571,7 @@ fun AiComputerLiveWindow(
                                                 pageTitle = view?.title ?: ""
                                                 url?.let {
                                                     urlBarText = it
+                                                    lastLoadedUrl = it
                                                     onNavigateUrl(it)
                                                 }
                                                 canGoBack = view?.canGoBack() == true
@@ -579,12 +584,15 @@ fun AiComputerLiveWindow(
                                                 if (newProgress >= 100) isPageLoading = false
                                             }
                                         }
-                                        loadUrl(currentUrl.ifBlank { "https://www.google.com" })
+                                        val target = currentUrl.ifBlank { "https://en.wikipedia.org/wiki/Artificial_intelligence" }
+                                        lastLoadedUrl = target
+                                        loadUrl(target)
                                         webViewInstance = this
                                     }
                                 },
                                 update = { view ->
-                                    if (view.url != currentUrl && currentUrl.isNotBlank()) {
+                                    if (currentUrl.isNotBlank() && currentUrl != lastLoadedUrl) {
+                                        lastLoadedUrl = currentUrl
                                         view.loadUrl(currentUrl)
                                     }
                                 }

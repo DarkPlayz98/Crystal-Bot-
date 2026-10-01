@@ -48,7 +48,6 @@ import com.example.ui.components.ModeSelectorSheet
 import com.example.ui.components.SettingsDialog
 import com.example.ui.components.WorkspaceBottomBar
 import com.example.ui.screens.AgentChannelsScreen
-import com.example.ui.screens.AppIntegrationsScreen
 import com.example.ui.screens.CloudComputersScreen
 import com.example.ui.screens.TeachAndRoutinesScreen
 import com.example.ui.screens.WelcomeScreen
@@ -322,15 +321,17 @@ fun CrystalWorkspaceRoot(
                             messages = uiState.channelMessages,
                             allAgents = uiState.agents,
                             isSwarmActive = uiState.isSwarmActive,
-                            onTriggerSwarmGoal = { viewModel.triggerSwarmGoal(it) }
+                            onTriggerSwarmGoal = { viewModel.triggerSwarmGoal(it) },
+                            onOpenBrowser = { agentId, url -> viewModel.openBrowserForAgent(agentId, url) },
+                            onOpenOs = { agentId -> viewModel.openOsForAgent(agentId) }
                         )
                     }
 
                     WorkspaceTab.CLOUD_COMPUTERS -> {
-                        // 3. PERSISTENT CLOUD COMPUTERS (Terminal, Browser, Files)
+                        // 3. PERSISTENT CLOUD COMPUTERS (Terminal, Browser, Files, Live OS)
                         val activeAgentId = uiState.selectedCloudAgentId
                         val logs = uiState.terminalLogs[activeAgentId] ?: emptyList()
-                        val currentUrl = uiState.browserUrls[activeAgentId] ?: "https://internal.agent.cloud"
+                        val currentUrl = uiState.browserUrls[activeAgentId] ?: "https://en.wikipedia.org/wiki/Artificial_intelligence"
                         val files = uiState.fileTrees[activeAgentId] ?: uiState.fileTrees["coding_bot"] ?: emptyList()
 
                         CloudComputersScreen(
@@ -341,7 +342,9 @@ fun CrystalWorkspaceRoot(
                             onRunCommand = { viewModel.runTerminalCommand(it) },
                             currentUrl = currentUrl,
                             onNavigateUrl = { viewModel.navigateBrowserUrl(it) },
-                            fileTree = files
+                            fileTree = files,
+                            initialTab = uiState.selectedComputerTab,
+                            onTabSelected = { viewModel.setComputerTab(it) }
                         )
                     }
 
@@ -353,17 +356,6 @@ fun CrystalWorkspaceRoot(
                             onRunRoutineNow = { viewModel.runRoutineNow(it) },
                             onCreateNewRoutine = { name, trigger, desc, steps ->
                                 viewModel.createNewRoutine(name, trigger, desc, steps)
-                            }
-                        )
-                    }
-
-                    WorkspaceTab.INTEGRATIONS -> {
-                        // 5. APP INTEGRATIONS (Gmail, Slack, Notion, Salesforce, HubSpot, GitHub)
-                        AppIntegrationsScreen(
-                            integrations = uiState.integrations,
-                            onToggleConnect = { viewModel.toggleIntegration(it) },
-                            onExecuteAction = { appId, action, summary ->
-                                viewModel.executeIntegrationAction(appId, action, summary)
                             }
                         )
                     }

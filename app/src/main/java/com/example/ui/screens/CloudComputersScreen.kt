@@ -65,6 +65,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
@@ -138,17 +139,27 @@ fun CloudComputersScreen(
     currentUrl: String,
     onNavigateUrl: (String) -> Unit,
     fileTree: List<CloudFile>,
+    initialTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val selectedAgent = agents.find { it.id == selectedAgentId } ?: agents.first()
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Terminal, 1 = Browser, 2 = File System, 3 = Bot OS
+    var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) } // 0 = Terminal, 1 = Browser, 2 = File System, 3 = Bot OS
     var isTermuxRouteActive by remember { mutableStateOf(false) }
     val isTermuxInstalled = remember { TermuxEngine.isTermuxAppInstalled(context) }
     var commandInput by remember { mutableStateOf("") }
     var selectedFile by remember { mutableStateOf<CloudFile?>(null) }
     var browserUrlInput by remember(currentUrl) { mutableStateOf(currentUrl) }
+
+    LaunchedEffect(initialTab) {
+        selectedTab = initialTab
+    }
+
+    LaunchedEffect(selectedTab) {
+        onTabSelected(selectedTab)
+    }
 
     fun executeTerminalCommand(cmd: String) {
         val trimmed = cmd.trim()
@@ -175,6 +186,7 @@ fun CloudComputersScreen(
 
     // Real WebView State
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var lastLoadedUrl by remember { mutableStateOf("") }
     var pageTitle by remember { mutableStateOf("") }
     var pageProgress by remember { mutableIntStateOf(0) }
     var isPageLoading by remember { mutableStateOf(false) }
@@ -188,9 +200,10 @@ fun CloudComputersScreen(
         val finalUrl = when {
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
             trimmed.contains(".") && !trimmed.contains(" ") -> "https://$trimmed"
-            else -> "https://www.google.com/search?q=" + URLEncoder.encode(trimmed, "UTF-8")
+            else -> "https://en.wikipedia.org/w/index.php?search=" + URLEncoder.encode(trimmed, "UTF-8")
         }
         browserUrlInput = finalUrl
+        lastLoadedUrl = finalUrl
         onNavigateUrl(finalUrl)
         webViewInstance?.loadUrl(finalUrl)
     }
@@ -288,81 +301,87 @@ fun CloudComputersScreen(
             }
         }
 
-        // 3-Tab Selector: Terminal, Browser, File System
-        ScrollableTabRow(
+        // 4-Tab Full Width Segmented Selector: Terminal, Browser, File System, Bot OS
+        TabRow(
             selectedTabIndex = selectedTab,
             containerColor = DarkSurfaceElevated,
             contentColor = CrystalCyanPrimary,
-            edgePadding = 12.dp,
             indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = CrystalCyanPrimary,
-                    height = 2.dp
-                )
+                if (selectedTab < tabPositions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = CrystalCyanPrimary,
+                        height = 2.5.dp
+                    )
+                }
             },
             divider = { HorizontalDivider(color = BorderSubtle) }
         ) {
             Tab(
                 selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
+                onClick = { 
+                    selectedTab = 0
+                    onTabSelected(0)
+                },
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Bash Terminal", fontSize = 12.sp, fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Terminal", fontSize = 11.sp, fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
             )
             Tab(
                 selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
+                onClick = { 
+                    selectedTab = 1
+                    onTabSelected(1)
+                },
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Real Browser", fontSize = 12.sp, fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF22C55E).copy(alpha = 0.2f))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text("100% LIVE", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text("Browser", fontSize = 11.sp, fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
             )
             Tab(
                 selected = selectedTab == 2,
-                onClick = { selectedTab = 2 },
+                onClick = { 
+                    selectedTab = 2
+                    onTabSelected(2)
+                },
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("File System", fontSize = 12.sp, fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Files", fontSize = 11.sp, fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
             )
             Tab(
                 selected = selectedTab == 3,
-                onClick = { selectedTab = 3 },
+                onClick = { 
+                    selectedTab = 3
+                    onTabSelected(3)
+                },
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Extension, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Bot OS (Termux)", fontSize = 12.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(WarmSunriseGlow)
-                                .border(1.dp, Color(0xFFFED7AA), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text("PROOT", color = WarmOrangePrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text("Bot OS", fontSize = 11.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
             )
@@ -611,11 +630,47 @@ fun CloudComputersScreen(
 
                 1 -> {
                     // 100% REAL LIVE ANDROID WEBVIEW BROWSER TAB
+                    LaunchedEffect(currentUrl) {
+                        if (currentUrl.isNotBlank() && currentUrl != browserUrlInput) {
+                            browserUrlInput = currentUrl
+                            webViewInstance?.loadUrl(currentUrl)
+                        }
+                    }
+
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(ObsidianBlack)
                     ) {
+                        // Active Agent Browser Viewport Banner
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(DarkSurfaceCard)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AgentAvatarView(shape = selectedAgent.shape, size = 18.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${selectedAgent.name}'s Live Browser Session",
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF22C55E).copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("LIVE WEBVIEW", color = Color(0xFF22C55E), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
                         // Browser Address & Control Bar
                         Column(
                             modifier = Modifier
@@ -888,6 +943,7 @@ fun CloudComputersScreen(
                                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                                 request?.url?.toString()?.let { newUrl ->
                                                     browserUrlInput = newUrl
+                                                    lastLoadedUrl = newUrl
                                                     onNavigateUrl(newUrl)
                                                     view?.loadUrl(newUrl)
                                                 }
@@ -898,6 +954,7 @@ fun CloudComputersScreen(
                                                 isPageLoading = true
                                                 url?.let {
                                                     browserUrlInput = it
+                                                    lastLoadedUrl = it
                                                     onNavigateUrl(it)
                                                 }
                                                 canGoBack = view?.canGoBack() == true
@@ -911,8 +968,42 @@ fun CloudComputersScreen(
                                                 canGoForward = view?.canGoForward() == true
                                                 url?.let {
                                                     browserUrlInput = it
+                                                    lastLoadedUrl = it
                                                     onNavigateUrl(it)
                                                 }
+                                            }
+
+                                            override fun onReceivedError(
+                                                view: WebView?,
+                                                errorCode: Int,
+                                                description: String?,
+                                                failingUrl: String?
+                                            ) {
+                                                isPageLoading = false
+                                                val safeUrl = failingUrl ?: ""
+                                                val fallbackHtml = """
+                                                    <!DOCTYPE html>
+                                                    <html>
+                                                    <head>
+                                                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                                        <style>
+                                                            body { background: #0b0f19; color: #f1f5f9; font-family: sans-serif; padding: 24px; text-align: center; }
+                                                            h3 { color: #38bdf8; margin-top: 30px; font-size: 18px; }
+                                                            p { color: #94a3b8; font-size: 13px; line-height: 1.5; }
+                                                            .btn { display: inline-block; background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; border-radius: 20px; padding: 8px 16px; margin: 8px 4px; text-decoration: none; font-size: 13px; font-weight: bold; }
+                                                        </style>
+                                                    </head>
+                                                    <body>
+                                                        <h3>🌐 Live Web Portal</h3>
+                                                        <p>Connected to Agent Sandbox. Explore live web sources:</p>
+                                                        <a class="btn" href="https://en.wikipedia.org/wiki/Artificial_intelligence">Wikipedia AI</a>
+                                                        <a class="btn" href="https://news.ycombinator.com">Hacker News</a>
+                                                        <a class="btn" href="https://duckduckgo.com">DuckDuckGo</a>
+                                                        <a class="btn" href="https://github.com">GitHub</a>
+                                                    </body>
+                                                    </html>
+                                                """.trimIndent()
+                                                view?.loadDataWithBaseURL("https://duckduckgo.com", fallbackHtml, "text/html", "UTF-8", null)
                                             }
                                         }
 
@@ -927,12 +1018,15 @@ fun CloudComputersScreen(
                                             }
                                         }
 
-                                        loadUrl(currentUrl.ifBlank { "https://news.ycombinator.com" })
+                                        val target = currentUrl.ifBlank { "https://en.wikipedia.org/wiki/Artificial_intelligence" }
+                                        lastLoadedUrl = target
+                                        loadUrl(target)
                                         webViewInstance = this
                                     }
                                 },
                                 update = { view ->
-                                    if (view.url != currentUrl && currentUrl.isNotBlank()) {
+                                    if (currentUrl.isNotBlank() && currentUrl != lastLoadedUrl) {
+                                        lastLoadedUrl = currentUrl
                                         view.loadUrl(currentUrl)
                                     }
                                 }

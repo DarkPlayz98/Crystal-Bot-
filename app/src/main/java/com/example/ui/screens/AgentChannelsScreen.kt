@@ -74,9 +74,16 @@ import com.example.ui.theme.ObsidianBlack
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.WarmOrangePrimary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 
 @Composable
 fun AgentChannelsScreen(
@@ -87,6 +94,8 @@ fun AgentChannelsScreen(
     allAgents: List<AgentProfile>,
     isSwarmActive: Boolean,
     onTriggerSwarmGoal: (String) -> Unit,
+    onOpenBrowser: (agentId: String, url: String) -> Unit = { _, _ -> },
+    onOpenOs: (agentId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val selectedChannel = channels.find { it.id == selectedChannelId } ?: channels.first()
@@ -144,7 +153,7 @@ fun AgentChannelsScreen(
             }
         }
 
-        // Channel Info Header & Active Agent Swarm Members
+        // Channel Info Header & Quick System Shortcuts
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -153,7 +162,7 @@ fun AgentChannelsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "#${selectedChannel.name}",
                     color = TextPrimary,
@@ -163,24 +172,39 @@ fun AgentChannelsScreen(
                 Text(
                     text = selectedChannel.topic,
                     color = TextMuted,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // Participating Agent Avatars
+            // Quick Jump to Live Browser & Bot OS
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy((-6).dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                allAgents.take(4).forEach { agent ->
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, DarkSurfaceCard, CircleShape)
-                    ) {
-                        AgentAvatarView(shape = agent.shape, size = 26.dp)
-                    }
+                Button(
+                    onClick = { onOpenBrowser("research_bot", "") },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceHighlight),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Icon(Icons.Default.Language, contentDescription = null, tint = CrystalSkyBlue, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Browser", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { onOpenOs("chief_of_staff") },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceHighlight),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Live OS", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -305,23 +329,100 @@ fun AgentChannelsScreen(
                                 }
                             }
 
-                            // Terminal output preview snippet
-                            if (msg.terminalOutputPreview != null) {
-                                Spacer(modifier = Modifier.height(4.dp))
+                            // 🌐 Live Browser Viewport Preview (Direct 1-tap jump to Real Browser)
+                            if (msg.browserUrlPreview != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(CodeBackground)
-                                        .border(1.dp, CodeBorder, RoundedCornerShape(6.dp))
-                                        .padding(8.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF0F172A))
+                                        .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(12.dp))
+                                        .padding(10.dp)
                                 ) {
-                                    Text(
-                                        text = msg.terminalOutputPreview,
-                                        color = Color(0xFF86EFAC),
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Language, contentDescription = null, tint = CrystalSkyBlue, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "${msg.senderName} Live Web Session",
+                                                    color = CrystalSkyBlue,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Text(
+                                                text = msg.browserUrlPreview,
+                                                color = TextSecondary,
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Button(
+                                            onClick = {
+                                                val agentId = if (msg.senderName.contains("Atlas", ignoreCase = true)) "research_bot" else "chief_of_staff"
+                                                onOpenBrowser(agentId, msg.browserUrlPreview)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CrystalCyanPrimary),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(30.dp)
+                                        ) {
+                                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = ObsidianBlack, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Open Browser", color = ObsidianBlack, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 💻 Terminal & OS Output Preview snippet (with 1-tap jump to Live OS)
+                            if (msg.terminalOutputPreview != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(CodeBackground)
+                                        .border(1.dp, CodeBorder, RoundedCornerShape(10.dp))
+                                        .padding(10.dp)
+                                ) {
+                                    Column {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(13.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Ubuntu Container Execution", color = Color(0xFF22C55E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            TextButton(
+                                                onClick = { onOpenOs("coding_bot") },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(24.dp)
+                                            ) {
+                                                Text("Open in OS", color = WarmOrangePrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = msg.terminalOutputPreview,
+                                            color = Color(0xFF86EFAC),
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
                                 }
                             }
                         }

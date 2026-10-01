@@ -51,7 +51,7 @@ class GeminiService(
     suspend fun streamGenerate(
         conversation: List<GeminiMessage>,
         systemInstruction: String?,
-        model: String = "gemini-3.5-flash",
+        model: String = "gemini-2.5-flash",
         temperature: Float = 0.7f,
         onChunk: (String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -159,6 +159,154 @@ class GeminiService(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun generateContent(
+        conversation: List<GeminiMessage>,
+        systemInstruction: String?,
+        model: String = "gemini-2.5-flash",
+        temperature: Float = 0.7f
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getResolvedApiKey()
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                IllegalStateException("GEMINI_API_KEY is not configured.")
+            )
+        }
+
+        try {
+            val requestJson = JSONObject()
+
+            val contentsArray = JSONArray()
+            for (msg in conversation) {
+                val contentObj = JSONObject()
+                contentObj.put("role", if (msg.role == "assistant") "model" else msg.role)
+                val partsArray = JSONArray()
+                for (part in msg.parts) {
+                    val partObj = JSONObject()
+                    if (part.text != null) {
+                        partObj.put("text", part.text)
+                    }
+                    if (part.bitmap != null) {
+                        val inlineObj = JSONObject()
+                        inlineObj.put("mimeType", part.mimeType)
+                        inlineObj.put("data", part.bitmap.toBase64())
+                        partObj.put("inlineData", inlineObj)
+                    }
+                    partsArray.put(partObj)
+                }
+                contentObj.put("parts", partsArray)
+                contentsArray.put(contentObj)
+            }
+            requestJson.put("contents", contentsArray)
+
+            if (!systemInstruction.isNullOrBlank()) {
+                val sysObj = JSONObject()
+                val sysParts = JSONArray()
+                sysParts.put(JSONObject().put("text", systemInstruction))
+                sysObj.put("parts", sysParts)
+                requestJson.put("systemInstruction", sysObj)
+            }
+
+            val configObj = JSONObject()
+            configObj.put("temperature", temperature)
+            requestJson.put("generationConfig", configObj)
+
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val requestBody = requestJson.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: "HTTP error ${response.code}"
+                val errorMsg = try {
+                    JSONObject(errorBody).getJSONObject("error").getString("message")
+                } catch (e: Exception) {
+                    errorBody
+                }
+                return@withContext Result.failure(Exception(errorMsg))
+            }
+
+            val responseBody = response.body?.string() ?: return@withContext Result.failure(Exception("Empty response body"))
+            val root = JSONObject(responseBody)
+            val candidates = root.optJSONArray("candidates")
+            if (candidates != null && candidates.length() > 0) {
+                val candidate = candidates.getJSONObject(0)
+                val content = candidate.optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                if (parts != null && parts.length() > 0) {
+                    val sb = StringBuilder()
+                    for (i in 0 until parts.length()) {
+                        sb.append(parts.getJSONObject(i).optString("text", ""))
+                    }
+                    return@withContext Result.success(sb.toString())
+                }
+            }
+
+            Result.failure(Exception("No content returned in response"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun generateSwarmAgentResponse(
+        agentRole: String,
+        agentName: String,
+        swarmGoal: String,
+        contextHistory: String,
+        model: String = "gemini-2.5-flash"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getResolvedApiKey()
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                IllegalStateException("GEMINI_API_KEY is not configured.")
+            )
+        }
+
+        val systemPrompt = """
+            You are $agentName, an expert autonomous bot in a collaborative AI swarm.
+            Your role: $agentRole.
+            Swarm Goal from User: "$swarmGoal"
+            Prior conversation in channel:
+            $contextHistory
+
+            Guidelines:
+            - Respond in first person as $agentName with distinctive personality and domain expertise.
+            - Address the user's specific goal with fresh reasoning, real domain knowledge, and zero canned text.
+            - For research (Atlas): state factual discoveries and cite a real relevant URL (e.g. Wikipedia, GitHub, official documentation).
+            - For design/UI (Nova): provide visual layout, component specs, typography, or UI design details.
+            - For engineering (Cipher): write real code snippets, shell commands, or test executions.
+            - Keep your response structured, practical, and concise (80 to 140 words).
+        """.trimIndent()
+
+        val conversation = listOf(
+            GeminiMessage(
+                role = "user",
+                parts = listOf(GeminiMessagePart(text = "Execute your swarm sub-task for: \"$swarmGoal\""))
+            )
+        )
+
+        // Try direct generateContent first, with streamGenerate fallback
+        val directResult = generateContent(
+            conversation = conversation,
+            systemInstruction = systemPrompt,
+            model = model,
+            temperature = 0.7f
+        )
+        if (directResult.isSuccess) {
+            return@withContext directResult
+        }
+
+        streamGenerate(
+            conversation = conversation,
+            systemInstruction = systemPrompt,
+            model = model,
+            temperature = 0.7f,
+            onChunk = { /* non-streaming aggregation */ }
+        )
     }
 
     suspend fun generateImage(prompt: String): Result<String> = withContext(Dispatchers.IO) {
