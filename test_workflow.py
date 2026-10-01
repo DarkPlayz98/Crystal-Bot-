@@ -180,7 +180,7 @@ def run_tests():
     test(86, "Keystore step decodes base64 with 'base64 -d'", lambda: "base64 -d debug.keystore.base64 > debug.keystore" in raw_content)
     test(87, "Keystore step accepts RELEASE_KEYSTORE_BASE64 from GitHub Secrets", lambda: "RELEASE_KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}" in raw_content)
     test(88, "Keystore step writes output to 'my-upload-key.jks'", lambda: "my-upload-key.jks" in raw_content)
-    test(89, "Keystore step provides automated fallback to debug.keystore", lambda: "cp debug.keystore my-upload-key.jks" in raw_content)
+    test(89, "Keystore step provides automated fallback generation via keytool", lambda: "keytool -genkey" in raw_content)
     test(90, "No raw private keys or binary data hardcoded in YAML", lambda: "BEGIN PRIVATE KEY" not in raw_content)
 
     # -------------------------------------------------------------
