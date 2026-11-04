@@ -25,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -53,17 +54,24 @@ import com.example.ui.theme.ObsidianBlack
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.data.model.ChatProvider
 
 @Composable
 fun SettingsDialog(
     currentApiKey: String?,
-    onSaveApiKey: (String?) -> Unit,
+    currentProvider: ChatProvider,
+    currentOllamaBaseUrl: String,
+    currentOllamaModel: String,
+    onSaveSettings: (ChatProvider, String, String, String?) -> Unit,
     speechRate: Float,
     onSpeechRateChange: (Float) -> Unit,
     onSignOut: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var apiKeyText by remember { mutableStateOf(currentApiKey ?: "") }
+    var selectedProvider by remember { mutableStateOf(currentProvider) }
+    var ollamaBaseUrl by remember { mutableStateOf(currentOllamaBaseUrl) }
+    var ollamaModel by remember { mutableStateOf(currentOllamaModel) }
     var currentSpeechRate by remember { mutableFloatStateOf(speechRate) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -134,7 +142,7 @@ fun SettingsDialog(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Inspired by Grok • 100% Free & Unlimited\nPowered by Gemini 3.5 Flash & 3.1 Pro",
+                                text = "Choose Gemini or connect your own local Ollama server.\nGemini usage follows its provider's terms and limits.",
                                 color = TextMuted,
                                 fontSize = 11.sp,
                                 lineHeight = 16.sp
@@ -142,45 +150,88 @@ fun SettingsDialog(
                         }
                     }
                 }
-
                 Spacer(modifier = Modifier.height(18.dp))
-
-                // Custom API Key Override
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Key,
-                        contentDescription = null,
-                        tint = CrystalCyanPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Text model provider",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                ChatProvider.entries.forEach { provider ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedProvider == provider,
+                            onClick = { selectedProvider = provider }
+                        )
+                        Text(
+                            text = provider.label,
+                            color = TextPrimary,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+                if (selectedProvider == ChatProvider.OLLAMA) {
                     Text(
-                        text = "Gemini API Key (Optional Override)",
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = "Ollama must be installed and running on a machine this device can reach.",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = ollamaBaseUrl,
+                        onValueChange = { ollamaBaseUrl = it },
+                        label = { Text("Ollama server URL") },
+                        placeholder = { Text("http://10.0.2.2:11434") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("ollama_url_input"),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = ollamaModel,
+                        onValueChange = { ollamaModel = it },
+                        label = { Text("Ollama model") },
+                        placeholder = { Text("llama3.2") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("ollama_model_input"),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = CrystalCyanPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Gemini API Key (Optional Override)",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Use your API key or configure GEMINI_API_KEY in the local secrets file.",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = apiKeyText,
+                        onValueChange = { apiKeyText = it },
+                        placeholder = { Text("Paste Gemini API Key", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("api_key_input"),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp)
                     )
                 }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Configured via AI Studio Secrets panel. You can also paste an override key here.",
-                    color = TextMuted,
-                    fontSize = 11.sp
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = apiKeyText,
-                    onValueChange = { apiKeyText = it },
-                    placeholder = { Text("Paste AI Studio API Key", color = TextMuted, fontSize = 12.sp) },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("api_key_input"),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp)
-                )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -223,7 +274,7 @@ fun SettingsDialog(
                 Button(
                     onClick = {
                         val clean = apiKeyText.trim().ifBlank { null }
-                        onSaveApiKey(clean)
+                        onSaveSettings(selectedProvider, ollamaBaseUrl, ollamaModel, clean)
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = CrystalCyanPrimary),

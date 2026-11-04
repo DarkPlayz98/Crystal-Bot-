@@ -111,7 +111,9 @@ fun CrystalWorkspaceRoot(
         scope.launch { drawerState.close() }
     }
 
-    val totalItems = uiState.messages.size + if (uiState.isGenerating) 1 else 0
+    val totalItems = uiState.messages.size +
+        (if (uiState.isGenerating) 1 else 0) +
+        (if (uiState.generationError != null) 1 else 0)
     LaunchedEffect(totalItems, uiState.streamingText.length) {
         if (totalItems > 0 && uiState.activeWorkspaceTab == WorkspaceTab.CHAT) {
             listState.animateScrollToItem(totalItems - 1)
@@ -245,7 +247,7 @@ fun CrystalWorkspaceRoot(
                     when (uiState.activeWorkspaceTab) {
                         WorkspaceTab.CHAT -> {
                             // 1. CHAT TAB
-                            if (uiState.messages.isEmpty() && !uiState.isGenerating) {
+                            if (uiState.messages.isEmpty() && !uiState.isGenerating && uiState.generationError == null) {
                                 HomeEmptyState(
                                     selectedMode = uiState.activeMode,
                                     onModeSelect = { viewModel.setActiveMode(it) },
@@ -302,6 +304,22 @@ fun CrystalWorkspaceRoot(
                                             ChatMessageItem(
                                                 message = placeholderMsg,
                                                 isStreamingThisMessage = true,
+                                                onOpenComputerWindow = {
+                                                    viewModel.setAiComputerWindowOpen(true)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    uiState.generationError?.let { error ->
+                                        item(key = "generation_error") {
+                                            ChatMessageItem(
+                                                message = ChatMessage(
+                                                    id = "generation_error",
+                                                    sessionId = uiState.currentSessionId ?: "",
+                                                    role = "assistant",
+                                                    content = error,
+                                                    modelBadge = "Connection error"
+                                                ),
                                                 onOpenComputerWindow = {
                                                     viewModel.setAiComputerWindowOpen(true)
                                                 }
@@ -383,8 +401,11 @@ fun CrystalWorkspaceRoot(
     if (uiState.showSettingsDialog) {
         SettingsDialog(
             currentApiKey = uiState.customApiKey,
-            onSaveApiKey = { key ->
-                viewModel.setCustomApiKey(key)
+            currentProvider = uiState.chatProvider,
+            currentOllamaBaseUrl = uiState.ollamaBaseUrl,
+            currentOllamaModel = uiState.ollamaModel,
+            onSaveSettings = { provider, baseUrl, model, key ->
+                viewModel.setChatModelSettings(provider, baseUrl, model, key)
             },
             speechRate = uiState.speechRate,
             onSpeechRateChange = { rate ->

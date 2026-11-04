@@ -69,7 +69,7 @@ fun ModeSelectorSheet(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Crystal Bot provides unrestricted access to all reasoning models for free.",
+                text = "Model availability and usage limits depend on your selected provider.",
                 color = TextSecondary,
                 fontSize = 13.sp
             )

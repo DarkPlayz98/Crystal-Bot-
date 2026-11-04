@@ -4,11 +4,13 @@ import android.graphics.Bitmap
 import com.example.data.local.ChatDao
 import com.example.data.local.ChatMessage
 import com.example.data.local.ChatSession
+import com.example.data.model.ChatProvider
 import com.example.data.model.GrokMode
 import com.example.data.model.WebSource
 import com.example.data.remote.GeminiMessage
 import com.example.data.remote.GeminiMessagePart
 import com.example.data.remote.GeminiService
+import com.example.data.remote.OllamaService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -22,9 +24,48 @@ class ChatRepository(
     private val chatDao: ChatDao,
     private var geminiService: GeminiService = GeminiService()
 ) {
-    fun updateCustomApiKey(apiKey: String?) {
+    private var chatProvider = ChatProvider.GEMINI
+    private var ollamaBaseUrl = "http://10.0.2.2:11434"
+    private var ollamaModel = "llama3.2"
+    private var ollamaService = OllamaService(ollamaBaseUrl, ollamaModel)
+
+    fun configureChatModel(
+        provider: ChatProvider,
+        baseUrl: String,
+        model: String,
+        apiKey: String?
+    ) {
+        chatProvider = provider
+        ollamaBaseUrl = baseUrl
+        ollamaModel = model
+        ollamaService = OllamaService(ollamaBaseUrl, ollamaModel)
         geminiService = GeminiService(apiKey)
     }
+
+    suspend fun streamGenerate(
+        conversation: List<GeminiMessage>,
+        systemInstruction: String?,
+        model: String,
+        temperature: Float,
+        onChunk: (String) -> Unit
+    ): Result<String> =
+        if (chatProvider == ChatProvider.OLLAMA) {
+            ollamaService.streamGenerate(conversation, systemInstruction, temperature, onChunk)
+        } else {
+            geminiService.streamGenerate(conversation, systemInstruction, model, temperature, onChunk)
+        }
+
+    suspend fun generateSwarmAgentResponse(
+        agentRole: String,
+        agentName: String,
+        swarmGoal: String,
+        contextHistory: String
+    ): Result<String> =
+        if (chatProvider == ChatProvider.OLLAMA) {
+            ollamaService.generateSwarmAgentResponse(agentRole, agentName, swarmGoal, contextHistory)
+        } else {
+            geminiService.generateSwarmAgentResponse(agentRole, agentName, swarmGoal, contextHistory)
+        }
 
     fun getAllSessions(): Flow<List<ChatSession>> = chatDao.getAllSessions()
 
@@ -134,6 +175,11 @@ class ChatRepository(
 
         // Handle Image Gen mode directly
         if (mode == GrokMode.IMAGE_GEN || userPrompt.startsWith("/imagine", ignoreCase = true) || userPrompt.startsWith("generate image", ignoreCase = true)) {
+            if (chatProvider == ChatProvider.OLLAMA) {
+                return@withContext Result.failure(
+                    IllegalStateException("Image generation requires Gemini. Switch the provider to Gemini to use this feature.")
+                )
+            }
             val cleanPrompt = userPrompt.removePrefix("/imagine").removePrefix("generate image").trim()
             val imgResult = geminiService.generateImage(cleanPrompt)
             val duration = System.currentTimeMillis() - startTime
@@ -169,9 +215,15 @@ class ChatRepository(
 
         // Standard Stream Generation
         val accumulatedText = StringBuilder()
-        val streamResult = geminiService.streamGenerate(
+        val systemInstruction = if (chatProvider == ChatProvider.OLLAMA && mode == GrokMode.DEEP_SEARCH) {
+            "${mode.systemPromptModifier}\nYou do not have live web access. Do not claim to search the web or invent citations or sources. State when current facts cannot be verified."
+        } else {
+            mode.systemPromptModifier
+        }
+        val streamResult = streamGenerate(
             conversation = contextList,
-            systemInstruction = mode.systemPromptModifier,
+            model = "gemini-2.5-flash",
+            systemInstruction = systemInstruction,
             temperature = if (mode == GrokMode.FUN) 0.9f else 0.4f
         ) { chunk ->
             accumulatedText.append(chunk)
@@ -180,7 +232,11 @@ class ChatRepository(
         }
 
         val duration = System.currentTimeMillis() - startTime
-
+        if (chatProvider == ChatProvider.OLLAMA && streamResult.isFailure) {
+            return@withContext Result.failure(
+                streamResult.exceptionOrNull() ?: IllegalStateException("Ollama request failed.")
+            )
+        }
         if (streamResult.isSuccess) {
             val raw = accumulatedText.toString()
             val parsed = parseThoughtAndSources(raw, mode)
@@ -204,7 +260,11 @@ class ChatRepository(
                 reasoning = parsed.reasoning,
                 thinkingDurationMs = duration,
                 sourcesJson = sourcesJson,
-                modelBadge = mode.title
+                modelBadge = if (chatProvider == ChatProvider.OLLAMA) {
+                    "${ollamaModel} · ${mode.title}"
+                } else {
+                    mode.title
+                }
             )
             chatDao.insertMessage(botMsg)
             Result.success(botMsg)
@@ -265,7 +325,7 @@ class ChatRepository(
         }
 
         // If DeepSearch, extract citations or synthesize grounded sources
-        if (mode == GrokMode.DEEP_SEARCH) {
+        if (mode == GrokMode.DEEP_SEARCH && chatProvider == ChatProvider.GEMINI) {
             val domainRegex = Regex("\\[([a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})\\]")
             val matches = domainRegex.findAll(text)
             val foundDomains = matches.map { it.groupValues[1] }.distinct().toList()

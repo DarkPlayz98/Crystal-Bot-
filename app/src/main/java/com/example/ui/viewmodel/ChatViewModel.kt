@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.ChatMessage
 import com.example.data.local.ChatSession
 import com.example.data.local.CrystalDatabase
+import com.example.data.model.ChatProvider
 import com.example.data.model.AgentChannel
 import com.example.data.model.AgentProfile
 import com.example.data.model.AgentShape
@@ -18,7 +19,6 @@ import com.example.data.model.CloudFile
 import com.example.data.model.GrokMode
 import com.example.data.model.TeachableSkillRoutine
 import com.example.data.model.TerminalLog
-import com.example.data.remote.GeminiService
 import com.example.data.termux.TermuxEngine
 import com.example.data.model.WebSource
 import com.example.data.repository.ChatRepository
@@ -58,6 +58,10 @@ data class ChatUiState(
     val showModeSheet: Boolean = false,
     val showSettingsDialog: Boolean = false,
     val customApiKey: String? = null,
+    val chatProvider: ChatProvider = ChatProvider.GEMINI,
+    val ollamaBaseUrl: String = "http://10.0.2.2:11434",
+    val ollamaModel: String = "llama3.2",
+    val generationError: String? = null,
     val speechRate: Float = 1.0f,
     val isSpeaking: Boolean = false,
     val currentlySpeakingText: String? = null,
@@ -87,8 +91,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val db = CrystalDatabase.getInstance(application)
     private val repository = ChatRepository(db.chatDao())
     private val authService = com.example.data.auth.AuthService(application)
+    private val settingsPreferences =
+        application.getSharedPreferences("crystal_model_settings", android.content.Context.MODE_PRIVATE)
+    private val savedProvider = ChatProvider.fromId(settingsPreferences.getString("chat_provider", null))
+    private val savedOllamaBaseUrl =
+        settingsPreferences.getString("ollama_base_url", "http://10.0.2.2:11434") ?: "http://10.0.2.2:11434"
+    private val savedOllamaModel = settingsPreferences.getString("ollama_model", "llama3.2") ?: "llama3.2"
 
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState = MutableStateFlow(
+        ChatUiState(
+            chatProvider = savedProvider,
+            ollamaBaseUrl = savedOllamaBaseUrl,
+            ollamaModel = savedOllamaModel
+        )
+    )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var activeGenerationJob: Job? = null
@@ -97,6 +113,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var isTtsInitialized = false
 
     init {
+        repository.configureChatModel(
+            savedProvider,
+            savedOllamaBaseUrl,
+            savedOllamaModel,
+            _uiState.value.customApiKey
+        )
         initTts(application)
         initAgentsAndCloud()
         initChannelsAndCollab()
@@ -362,6 +384,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             attachedBitmap = null,
             isGenerating = false,
             streamingText = "",
+            generationError = null,
             streamingReasoning = null,
             streamingSources = null,
             activeWorkspaceTab = WorkspaceTab.CHAT
@@ -672,7 +695,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     trimmedCmd
                 }
-                val gemini = com.example.data.remote.GeminiService(_uiState.value.customApiKey)
                 val prompt = """
                     You are the bash terminal shell of an autonomous cloud computer ($agentId).
                     The user entered this command or instruction:
@@ -681,7 +703,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     Output ONLY the realistic, authentic terminal stdout/stderr output or answer produced by this command on an Ubuntu Linux container. If it's a bash command, python code, or question, run or answer it with authentic terminal formatted output. Keep it concise, realistic, and formatted like standard terminal console text. Do not wrap in markdown code blocks.
                 """.trimIndent()
 
-                val result = gemini.streamGenerate(
+                val result = repository.streamGenerate(
                     conversation = listOf(
                         com.example.data.remote.GeminiMessage(
                             role = "user",
@@ -696,6 +718,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val output = if (result.isSuccess && !result.getOrNull().isNullOrBlank()) {
                     result.getOrNull()!!.trim()
+                } else if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "[Ollama error] ${result.exceptionOrNull()?.localizedMessage ?: "No response from the local model."}"
                 } else {
                     "[Pod: $agentId] Task executed successfully with code 0."
                 }
@@ -712,7 +736,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (logIndex in logs.indices) {
                     logs[logIndex] = TerminalLog(
                         command = trimmedCmd,
-                        output = "[simulated stdout] Command completed: $trimmedCmd\nOutput stream acknowledged by $agentId."
+                        output = if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                            "[Ollama error] ${e.localizedMessage ?: "Could not reach the local model."}"
+                        } else {
+                            "[simulated stdout] Command completed: $trimmedCmd\nOutput stream acknowledged by $agentId."
+                        }
                     )
                     val newMap = _uiState.value.terminalLogs.toMutableMap()
                     newMap[agentId] = logs
@@ -770,21 +798,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 2. Real Gemini AI Multi-Agent Autonomous Swarm Execution
         swarmJob?.cancel()
         swarmJob = viewModelScope.launch {
-            val gemini = GeminiService(_uiState.value.customApiKey)
-
             // Step 1: Crystal (Chief of Staff & Orchestrator) AI Triage
-            val chiefAi = gemini.generateSwarmAgentResponse(
+            val chiefAi = repository.generateSwarmAgentResponse(
                 agentRole = "Chief of Staff & Swarm Orchestrator. Analyze the user's prompt '$goal', deconstruct the objective into parallel technical streams, and assign precise deliverables to @Atlas (Deep Research), @Nova (UI/UX Architecture), and @Cipher (Full-Stack Dev & Terminal). Be actionable, clear, and specific.",
                 agentName = "Crystal (Chief)",
                 swarmGoal = goal,
                 contextHistory = "User requested: $goal"
             )
 
-            val chiefContent = chiefAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: run {
-                synthesizeDynamicChiefResponse(goal)
-            }
+            val chiefContent = chiefAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                ?: if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "Ollama error: ${chiefAi.exceptionOrNull()?.localizedMessage ?: "No response from the local model."}"
+                } else {
+                    synthesizeDynamicChiefResponse(goal)
+                }
 
-            val isGeminiChief = chiefAi.isSuccess && !chiefAi.getOrNull().isNullOrBlank()
+            val isModelChief = chiefAi.isSuccess && !chiefAi.getOrNull().isNullOrBlank()
             val chiefMsg = ChannelCollabMessage(
                 id = UUID.randomUUID().toString(),
                 channelId = channelId,
@@ -792,7 +821,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 senderShape = AgentShape.WHITE_SPHERE,
                 content = chiefContent,
                 delegatedTo = "Atlas, Nova, Cipher",
-                actionBadge = if (isGeminiChief) "Orchestrated via Gemini 2.5 Flash" else "Swarm Tactical Stream Online"
+                actionBadge = if (isModelChief) "Orchestrated via ${_uiState.value.chatProvider.label}" else "Swarm Tactical Stream Online"
             )
             _uiState.value = _uiState.value.copy(
                 channelMessages = _uiState.value.channelMessages + chiefMsg
@@ -801,16 +830,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             delay(1000)
 
             // Step 2: Atlas (Deep Research) AI Web Intelligence
-            val atlasAi = gemini.generateSwarmAgentResponse(
-                agentRole = "Deep Research & Web Intelligence. Research real-world facts, documentation, best practices, or technical data for '$goal'. Cite key technical takeaways and provide a real relevant web URL.",
+            val atlasAi = repository.generateSwarmAgentResponse(
+                agentRole = if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "Analyze the request using your existing knowledge. You have no live web access; do not claim to browse or invent sources or URLs. Clearly state when current facts cannot be verified."
+                } else {
+                    "Deep Research & Web Intelligence. Research real-world facts, documentation, best practices, or technical data for '$goal'. Cite key technical takeaways and provide a real relevant web URL."
+                },
                 agentName = "Atlas",
                 swarmGoal = goal,
                 contextHistory = "Chief instructed: $chiefContent"
             )
 
-            val atlasContent = atlasAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: run {
-                synthesizeDynamicAtlasResponse(goal)
-            }
+            val atlasContent = atlasAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                ?: if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "Ollama error: ${atlasAi.exceptionOrNull()?.localizedMessage ?: "No response from the local model."}"
+                } else {
+                    synthesizeDynamicAtlasResponse(goal)
+                }
 
             // Extract or build a real relevant URL for the user's research
             val urlRegex = Regex("""https?://[^\s)\]">]+""")
@@ -826,14 +862,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 browserUrls = _uiState.value.browserUrls + ("research_bot" to researchUrl) + ("chief_of_staff" to researchUrl)
             )
 
-            val isGeminiAtlas = atlasAi.isSuccess && !atlasAi.getOrNull().isNullOrBlank()
+            val isModelAtlas = atlasAi.isSuccess && !atlasAi.getOrNull().isNullOrBlank()
             val atlasMsg = ChannelCollabMessage(
                 id = UUID.randomUUID().toString(),
                 channelId = channelId,
                 senderName = "Atlas",
                 senderShape = AgentShape.PURPLE_CIRCLE,
                 content = atlasContent,
-                actionBadge = if (isGeminiAtlas) "Gemini 2.5 Flash Web Intelligence" else "Browser Research Synthesized",
+                actionBadge = if (isModelAtlas) "${_uiState.value.chatProvider.label} Web Intelligence" else "Browser Research Synthesized",
                 browserUrlPreview = researchUrl
             )
             _uiState.value = _uiState.value.copy(
@@ -843,25 +879,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             delay(1000)
 
             // Step 3: Nova (UI/UX) AI Product Architecture
-            val novaAi = gemini.generateSwarmAgentResponse(
+            val novaAi = repository.generateSwarmAgentResponse(
                 agentRole = "UI/UX & Product Design Specialist. Provide creative component architecture, layout hierarchy, visual styling tokens, and interaction patterns specifically for '$goal'.",
                 agentName = "Nova",
                 swarmGoal = goal,
                 contextHistory = "Atlas research: $atlasContent"
             )
 
-            val novaContent = novaAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: run {
-                synthesizeDynamicNovaResponse(goal)
-            }
+            val novaContent = novaAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                ?: if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "Ollama error: ${novaAi.exceptionOrNull()?.localizedMessage ?: "No response from the local model."}"
+                } else {
+                    synthesizeDynamicNovaResponse(goal)
+                }
 
-            val isGeminiNova = novaAi.isSuccess && !novaAi.getOrNull().isNullOrBlank()
+            val isModelNova = novaAi.isSuccess && !novaAi.getOrNull().isNullOrBlank()
             val novaMsg = ChannelCollabMessage(
                 id = UUID.randomUUID().toString(),
                 channelId = channelId,
                 senderName = "Nova",
                 senderShape = AgentShape.PINK_TRIANGLE,
                 content = novaContent,
-                actionBadge = if (isGeminiNova) "Gemini 2.5 Flash Design Architecture" else "UI Spec & Layout Tokens Ready"
+                actionBadge = if (isModelNova) "${_uiState.value.chatProvider.label} Design Architecture" else "UI Spec & Layout Tokens Ready"
             )
             _uiState.value = _uiState.value.copy(
                 channelMessages = _uiState.value.channelMessages + novaMsg
@@ -870,16 +909,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             delay(1000)
 
             // Step 4: Cipher (Full-Stack Dev) AI Code & Terminal Execution
-            val cipherAi = gemini.generateSwarmAgentResponse(
+            val cipherAi = repository.generateSwarmAgentResponse(
                 agentRole = "Full-Stack Software Engineer & Terminal Lead. Provide the core code implementation, shell command, or test script for '$goal'.",
                 agentName = "Cipher",
                 swarmGoal = goal,
                 contextHistory = "Nova design: $novaContent"
             )
 
-            val cipherContent = cipherAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: run {
-                synthesizeDynamicCipherResponse(goal)
-            }
+            val cipherContent = cipherAi.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                ?: if (_uiState.value.chatProvider == ChatProvider.OLLAMA) {
+                    "Ollama error: ${cipherAi.exceptionOrNull()?.localizedMessage ?: "No response from the local model."}"
+                } else {
+                    synthesizeDynamicCipherResponse(goal)
+                }
 
             val safeSlug = goal.take(15).replace(Regex("[^a-zA-Z0-9]"), "_").lowercase().ifBlank { "module" }
             val terminalCmd = "pytest tests/test_$safeSlug.py -v && git status"
@@ -895,14 +937,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 terminalLogs = _uiState.value.terminalLogs + ("coding_bot" to (existingCipherLogs + newTerminalLog))
             )
 
-            val isGeminiCipher = cipherAi.isSuccess && !cipherAi.getOrNull().isNullOrBlank()
+            val isModelCipher = cipherAi.isSuccess && !cipherAi.getOrNull().isNullOrBlank()
             val cipherMsg = ChannelCollabMessage(
                 id = UUID.randomUUID().toString(),
                 channelId = channelId,
                 senderName = "Cipher",
                 senderShape = AgentShape.CYAN_HEX,
                 content = cipherContent,
-                actionBadge = if (isGeminiCipher) "Gemini 2.5 Flash Build & Test Passed" else "Terminal: Tests & Code Built",
+                actionBadge = if (isModelCipher) "${_uiState.value.chatProvider.label} Coding Assistance" else "Terminal: Tests & Code Built",
                 terminalOutputPreview = "$ $terminalCmd\n$terminalOutput"
             )
             _uiState.value = _uiState.value.copy(
@@ -1019,6 +1061,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             currentSessionId = sessionId,
             currentSession = session,
+            generationError = null,
             activeMode = GrokMode.fromId(session?.defaultMode)
         )
         observeMessagesForSession(sessionId)
@@ -1038,6 +1081,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 attachedBitmap = null,
                 isGenerating = false,
                 streamingText = "",
+                generationError = null,
                 streamingReasoning = null,
                 streamingSources = null
             )
@@ -1065,9 +1109,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(showSettingsDialog = show)
     }
 
-    fun setCustomApiKey(key: String?) {
-        _uiState.value = _uiState.value.copy(customApiKey = key)
-        repository.updateCustomApiKey(key)
+    fun setChatModelSettings(provider: ChatProvider, ollamaBaseUrl: String, ollamaModel: String, apiKey: String?) {
+        val cleanBaseUrl = ollamaBaseUrl.trim().ifBlank { "http://10.0.2.2:11434" }
+        val cleanModel = ollamaModel.trim().ifBlank { "llama3.2" }
+        settingsPreferences.edit()
+            .putString("chat_provider", provider.id)
+            .putString("ollama_base_url", cleanBaseUrl)
+            .putString("ollama_model", cleanModel)
+            .apply()
+        _uiState.value = _uiState.value.copy(
+            chatProvider = provider,
+            ollamaBaseUrl = cleanBaseUrl,
+            ollamaModel = cleanModel,
+            customApiKey = apiKey
+        )
+        repository.configureChatModel(provider, cleanBaseUrl, cleanModel, apiKey)
     }
 
     fun setSpeechRate(rate: Float) {
@@ -1131,11 +1187,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // Dynamically simulate and coordinate AI Computer action based on query
             val lowerPrompt = prompt.lowercase()
-            val isSearchOrResearch = mode == GrokMode.DEEP_SEARCH || mode == GrokMode.THINK || lowerPrompt.contains("search") || lowerPrompt.contains("who") || lowerPrompt.contains("what") || lowerPrompt.contains("news") || lowerPrompt.contains("wiki")
+            val isSearchOrResearch = _uiState.value.chatProvider == ChatProvider.GEMINI &&
+                (mode == GrokMode.THINK || mode == GrokMode.DEEP_SEARCH ||
+                    lowerPrompt.contains("search") || lowerPrompt.contains("who") ||
+                    lowerPrompt.contains("what") || lowerPrompt.contains("news") || lowerPrompt.contains("wiki"))
             val isCoding = lowerPrompt.contains("code") || lowerPrompt.contains("python") || lowerPrompt.contains("bug") || lowerPrompt.contains("terminal") || lowerPrompt.contains("run")
 
             val activeAgent = if (isSearchOrResearch) "research_bot" else if (isCoding) "coding_bot" else "chief_of_staff"
             val taskDesc = when {
+                _uiState.value.chatProvider == ChatProvider.OLLAMA && (mode == GrokMode.DEEP_SEARCH || mode == GrokMode.THINK) ->
+                    "Ollama answering locally without live web search"
                 isSearchOrResearch -> "Atlas browsing web & scraping references for: '${prompt.take(30)}...'"
                 isCoding -> "Cipher running bash compile & unit tests in sandbox"
                 else -> "Crystal synthesizing high-throughput intelligence response"
@@ -1156,6 +1217,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 attachedBitmap = null,
                 isGenerating = true,
                 streamingText = "",
+                generationError = null,
                 streamingReasoning = null,
                 streamingSources = null,
                 selectedCloudAgentId = activeAgent,
@@ -1165,7 +1227,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             activeGenerationJob?.cancel()
             activeGenerationJob = viewModelScope.launch {
-                repository.executeBotStream(
+                val generationResult = repository.executeBotStream(
                     sessionId = sessionId,
                     mode = mode,
                     userPrompt = prompt,
@@ -1182,6 +1244,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = _uiState.value.copy(
                     isGenerating = false,
                     streamingText = "",
+                    generationError = generationResult.exceptionOrNull()?.let { error ->
+                        "Could not generate a response: ${error.localizedMessage ?: "Unknown provider error."}"
+                    },
                     streamingReasoning = null,
                     streamingSources = null,
                     activeAiTaskDescription = "Task completed. Agent standing by in cloud computer."
